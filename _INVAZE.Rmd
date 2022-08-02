@@ -1,0 +1,337 @@
+---
+title: "Mapy napadení invazními druhy v ČR"
+author: "Katerina Krizova"
+date: "`r Sys.Date()`"
+output: 
+  pdf_document: 
+    toc: yes
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+```{r include = F}
+require(tidyverse)
+library(sf)
+library(sp)
+library(rgeos)
+library(rgdal)
+require(reshape2)
+require(ggpubr)
+library(knitr)
+
+path_in <- "D:/VURV/_INVAZE/data/" 
+path_shp <- "D:/VURV/_INVAZE/data/shp/" 
+path_out <- "D:/VURV/_INVAZE/results/" 
+
+```
+
+\newpage
+
+# INVAZNÍ DRUHY
+
+* [zavíječ zimostrázový](https://cs.wikipedia.org/wiki/Zav%C3%ADje%C4%8D_zimostr%C3%A1zov%C3%BD) (*Cydalima perspectalis*)
+* *doplnit další dle potřeby*
+
+```{r set spec and name, include=F}
+druh <- "zavi"
+
+if(druh == "zavi"){
+     druhnam <- "Zavíječ zimostrázový"
+  } else{
+    print("It's a trap!")
+  }
+```
+
+# ZÁKLADNÍ MAPOVÉ PODKLADY
+
+* EEA 10km grid (polygon)
+* kraje ČR (polygon)
+* ~~okresy (polygon)~~
+* ~~hranice HMP (polygon)~~
+* ~~DMR5G (raster)~~
+
+
+```{r}
+eea10 <- st_read(paste0(path_shp, "CZ_cut_EEA_refCZgrid_10km_5514.shp"), crs = 5514, quiet = T)
+nuts3 <- st_read(paste0(path_shp, "cr_nuts3.shp"), crs = 5514, quiet = T)
+```
+
+
+\newpage
+
+
+# BODY VÝSKYTU Z TABULKY
+
+## Pracovní tabulka
+
+
+Cydalima_operatFile.csv
+
+* Poslední verze **20.7.2022**
+
+* problém s CRS při čtení tabulky v csv a jejím převodu na body -> zatím převedeno na shp v QGIS !!!
+
+
+> náhled pracovní tabulky
+
+```{r}
+opf <- read.table(paste0(path_in, "Cydalima_operatFile.csv"), 
+                  header = TRUE, sep = ",", fill = T)
+head(opf)
+```
+
+> *id*
+
+pořadové číslo zaznamenaného výskytu
+
+> *zs*
+
+zeměpisná šířka == latitude == Y == N
+
+> *zd*
+
+zeměpisná délka == longitude == X == E
+
+> *stadium*
+
+stadium nalezeného organizmu (housenka; dospělec; NEVÍM)
+
+> *rok*
+
+rok nálezu
+
+> *kolo*
+
+identifikátor 'kola' tvorby mapy
+tvořen 'k' (*kolo*) + 211231 (*datum ve formátu rrmmdd)
+
+> *v_mape*
+
+nález zanesen do mapy **ANO** / **NE**
+
+
+## Převod souřadnic na bodový shapefile
+
+
+```{r include = F}
+pts <- st_as_sf(opf, coords = c("zd", "zs"), crs = 4326)
+```
+
+
+```{r, fig.cap = "Kontrolní zobrazení bodů"}
+ggplot(pts, aes(geometry = geometry))+
+  geom_sf()+
+  # ggtitle("EEA GRID CZ, n = 891") + 
+  coord_sf()+
+  theme_void()+
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank(), 
+        axis.ticks.y = element_blank(), axis.text.y = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+```
+
+
+\newpage
+
+
+# BODY VÝSKYTU JAKO SHAPEFILE
+
+problém s CRS při čtení tabulky v csv a jejím převodu na body -> zatím převedeno na shp v QGIS
+
+**cyd_k220720_5514.shp**
+
+
+```{r}
+point <- st_read(paste0(path_shp, "cyd_k220720_5514.shp"), crs = 5514, quiet = T)
+```
+
+## [EEA reference grid CZ](https://www.eea.europa.eu/data-and-maps/data/eea-reference-grids-2)
+
+* celkový počet čtverců **891**
+
+* prostorové rozlišení 10 km
+
+```{r fig.cap= "Rozsireni invazniho druhu na uzemi CR"}
+ggplot() +
+  geom_sf(data = eea10, aes(geometry = geometry)) +
+  geom_sf(data = point, aes(geometry = geometry)) +
+  coord_sf()+
+  theme_void()+
+  theme(axis.ticks.x = element_blank(), axis.text.x = element_blank(), 
+        axis.ticks.y = element_blank(), axis.text.y = element_blank(),
+        plot.title = element_text(hjust = 0.5))
+```
+
+## Body dle termínu
+
+
+```{r}
+p211231 <- point %>% 
+  filter(kolo == "k211231")
+p220617 <- point %>% 
+  filter(kolo == "k220617")
+p220720 <- point %>% 
+  filter(kolo == "k220720")
+```
+
+
+> **k211231** 
+
+kolo k 31.12.2021
+počet záznamů: `r nrow(p211231)`
+
+
+> **k220617**
+
+kolo k 17.6.2022
+počet záznamů: `r nrow(p220617)`
+
+
+> **k220720**
+
+kolo k 20.7.2022
+počet záznamů: `r nrow(p220720)`
+
+
+## Body nové vs. staré
+
+
+```{r, message=F, warning=FALSE}
+
+# filter starych a novych udaju
+
+stare <- point %>% 
+  filter(v_mape == "ANO")
+nove <- point %>% 
+  filter(v_mape == "NE")
+
+# prekryv starych a novych udaju se ctverci
+
+sq_stare <- eea10[subset(stare, predicate = "contains"), ]
+sq_nove <- eea10[subset(nove, predicate = "contains"), ]
+
+# porovnani ID ctvercu starych a novych udaju -> kde je nove zaznamenany vyskyt?
+
+sq_rozsir <- sq_nove %>% 
+  dplyr::filter(!CELLCODE %in% sq_stare$CELLCODE)
+
+# identifikace ID bodoveho zaznamu z novych udaju -> odmena
+  
+sq_odmena <- point[subset(sq_rozsir, predicate = "intersects"), ]  
+
+# centroid ctvercu s potvrzenym vyskytem
+
+sq_vyskyt <- eea10[subset(point, predicate = "contains"), ] # všechny body
+sq_centroid <- st_centroid(sq_vyskyt)
+
+```
+
+> **stare** sf point
+
+údaje, které už byly zaznamenány v předchozích kolech: `r nrow(stare)`
+
+> **nove** sf point
+
+nove: nově přidané údaje, které je nutné zanalyzovat: `r nrow(nove)`
+
+> **sq_stare** sf polygon
+
+čtverce, kde už byl výsket potvrzen v předchozích kolech: `r nrow(sq_stare)`
+
+> **sq_nove** sf polygon
+
+čtverce, které obsahují nově přidaná bodová data: `r nrow(sq_nove)`
+
+> **sq_rozsir** sf polygon
+
+filtr čtverců, které zatím nebyly obsazeny: `r nrow(sq_rozsir)`
+
+> **sq_odmena** sf point
+
+filtr \textcolor{red}{ZCELA NOVÝCH} údajů pro potřeby udělní odměny:
+
+```{r}
+print(sq_odmena)
+```
+
+
+# TVORBA LAYOUTU
+
+```{r, message = F, warning=F, fig.cap= "Rozšíření invazního druhu v České republice"}
+require(ggspatial) # annotation scale in ggplot layout
+require(ggsn) # annotation scale in ggplot layout
+# require(GISTools) # annotation scale in ggplot layout
+require(prettymapr) # annotation scale in ggplot layout
+
+
+ggplot() +
+  geom_sf(data = eea10, aes(geometry = geometry, fill = "výskyt nepotvrzen")) + # vsechny ctverce
+  geom_sf(data = sq_stare, aes(geometry = geometry, fill = "potvrzený výskyt")) +   # stare ctverce
+  # geom_sf(data = sq_nove, aes(geometry = geometry, fill = "yellow")) + # nove ctverce
+  geom_sf(data = sq_rozsir, aes(geometry = geometry, fill = "NOVĚ potvrzený výskyt")) + 
+  geom_sf(data = nuts3, aes(geometry = geometry), fill=NA) + 
+  # geom_sf(data = point, aes(geometry = geometry), size = 1, color = "gray22") + # vsechny body
+  geom_sf(data = sq_centroid, aes(geometry = geometry), size = 1.5, color = "firebrick") +
+  scale_fill_manual(values = c("výskyt nepotvrzen" = "darkolivegreen3",
+                               "potvrzený výskyt" = "white",
+                               "NOVĚ potvrzený výskyt" = "yellow")) +
+  labs(fill = "", title = expression(paste("Rozšíření zavíječe zimostrázového " , italic("(Cydalima perspectalis)"), 
+                                           " v České republice")))+
+  annotation_scale(
+    location = "br",
+    style = "ticks",
+    plot_unit = NULL,
+    bar_cols = c("gray22", "white"),
+    line_width = 1,
+    height = unit(0.25, "cm"),
+    pad_x = unit(0.25, "cm"),
+    pad_y = unit(0.25, "cm"),
+    text_pad = unit(0.15, "cm"),
+    text_cex = 0.8,
+    text_face = NULL,
+    # text_family = "",
+    tick_height = 1
+)+ # https://stackoverflow.com/questions/61809382/how-can-i-put-a-scalebar-and-a-north-arrow-on-the-map-ggplot
+  annotation_north_arrow( 
+    location = "br",
+    height = unit(1, "cm"),
+    width = unit(0.8, "cm"),
+    pad_x = unit(0.75, "cm"),
+    pad_y = unit(0.90, "cm"),
+    rotation = NULL,
+    text_size = 30, # nefunguje
+    style = north_arrow_orienteering
+)+
+  coord_sf()+
+  theme_void(
+        base_size = 11,
+        # base_family = "Arial",
+        base_line_size = base_size/22,
+        base_rect_size = base_size/22)+
+  theme(legend.position = c(0.85, 0.85), 
+        plot.title = element_text(hjust = 0.5))
+
+currentDate <- Sys.Date()
+ggsave(paste0(path_out, currentDate, "_", druh, "_mapa.jpg"), device = "jpg", width = 10, height = 6, dpi = 300)
+
+
+      # scale_colour_manual(values = c("B" = "pink", "C" = "purple")) +
+  # scalebar(eea10, dist = 25, dist_unit = "km",
+  #          transform = F, model = "WGS84",
+  #          st.size = 3, box.color = "black", box.fill = "white",
+  #           arrow_length = 100, arrow_distance = 60, arrow_north_size = 6) + # meritko
+  # north(eea10, location = "topright", scale = 0.1, symbol = 12)+
+  
+  # scalebar(eea10, distance_legend = 25, dist_unit = "km",
+  #                  arrow_length = 100, arrow_distance = 60, arrow_north_size = 6)+
+    
+
+ # scalebar(eea10, dist = 25, dist_unit = "km",
+ #           transform = F, model = "WGS84",
+ #           st.size = 3, box.color = "gray20", box.fill = "white") + # meritko
+ #  north(eea10, location = "bottomright", scale = 0.1, symbol = 15)+  
+
+```
+
